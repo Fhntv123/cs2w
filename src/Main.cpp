@@ -73,10 +73,7 @@ DWORD WINAPI OnDllAttach(LPVOID lpParameter)
         if (!Input::Setup())
             throw std::runtime_error(X("failed to setup inputs"));
 
-        VexLog("Draw::Setup...");
-        if (!Draw::m_bInitialized)
-            Draw::Setup(Interfaces::m_pDevice, Interfaces::m_pDeviceContext);
-
+        // Draw::Setup is called inside hkPresent (guaranteed DX11 ready)
         VexLog("Hooks::Setup...");
         if (!Hooks::Setup())
             throw std::runtime_error(X("failed to setup hooks"));
