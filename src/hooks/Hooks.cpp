@@ -42,28 +42,52 @@ bool Hooks::Setup()
 	if (MH_Initialize() != MH_OK)
 		throw std::runtime_error(X("failed initialize minhook"));
 
-	// --- MENU-ONLY MODE: only DX11 hooks, everything else disabled ---
-	SubscribeHook(Detours::Present.Init(&hkPresent, Memory::GetVFunc(Interfaces::m_pSwapChain->pDXGISwapChain, 8U)));
-	SubscribeHook(Detours::ResizeBuffers.Init(&hkResizeBuffers, Memory::GetVFunc(Interfaces::m_pSwapChain->pDXGISwapChain, 13U)));
+	// ── MENU-ONLY MODE ────────────────────────────────────────────────────────
+	// Only hook DX11 Present + ResizeBuffers. Mouse hooks only if ptrs are valid.
+	// Everything else disabled until menu works without crash.
 
-	IDXGIDevice* pDXGIDevice = NULL;
-	Interfaces::m_pDevice->QueryInterface(IID_PPV_ARGS(&pDXGIDevice));
-	IDXGIAdapter* pDXGIAdapter = NULL;
-	pDXGIDevice->GetAdapter(&pDXGIAdapter);
-	IDXGIFactory* pIDXGIFactory = NULL;
-	pDXGIAdapter->GetParent(IID_PPV_ARGS(&pIDXGIFactory));
-	SubscribeHook(Detours::CreateSwapChain.Init(&hkCreateSwapChain, pIDXGIFactory, 10));
-	pDXGIDevice->Release(); pDXGIDevice = nullptr;
-	pDXGIAdapter->Release(); pDXGIAdapter = nullptr;
-	pIDXGIFactory->Release(); pIDXGIFactory = nullptr;
+	// Present — required for ImGui rendering
+	if (Interfaces::m_pSwapChain == nullptr || Interfaces::m_pSwapChain->pDXGISwapChain == nullptr)
+		throw std::runtime_error(X("m_pSwapChain is null, cannot hook Present"));
 
-	// Mouse input — needed so menu is clickable
-	SubscribeHook(Detours::MouseInputEnabled.Init(&hkMouseInputEnabled, Interfaces::m_pInput, 19));
-	SubscribeHook(Detours::IsRelativeMouseMode.Init(&hkIsRelativeMouseMode, Interfaces::m_pInputSystem, 76));
+	SubscribeHook(Detours::Present.Init(&hkPresent,
+		Memory::GetVFunc(Interfaces::m_pSwapChain->pDXGISwapChain, 8U)));
+
+	SubscribeHook(Detours::ResizeBuffers.Init(&hkResizeBuffers,
+		Memory::GetVFunc(Interfaces::m_pSwapChain->pDXGISwapChain, 13U)));
+
+	// CreateSwapChain — safe only if DXGI chain is available
+	// Wrap in null checks to avoid crash if QueryInterface fails
+	{
+		IDXGIDevice*  pDXGIDevice  = nullptr;
+		IDXGIAdapter* pDXGIAdapter = nullptr;
+		IDXGIFactory* pIDXGIFactory = nullptr;
+
+		if (Interfaces::m_pDevice &&
+			SUCCEEDED(Interfaces::m_pDevice->QueryInterface(IID_PPV_ARGS(&pDXGIDevice))) &&
+			pDXGIDevice != nullptr &&
+			SUCCEEDED(pDXGIDevice->GetAdapter(&pDXGIAdapter)) &&
+			pDXGIAdapter != nullptr &&
+			SUCCEEDED(pDXGIAdapter->GetParent(IID_PPV_ARGS(&pIDXGIFactory))) &&
+			pIDXGIFactory != nullptr)
+		{
+			SubscribeHook(Detours::CreateSwapChain.Init(&hkCreateSwapChain, pIDXGIFactory, 10));
+		}
+
+		if (pDXGIDevice)  { pDXGIDevice->Release();  pDXGIDevice  = nullptr; }
+		if (pDXGIAdapter) { pDXGIAdapter->Release(); pDXGIAdapter = nullptr; }
+		if (pIDXGIFactory){ pIDXGIFactory->Release();pIDXGIFactory= nullptr; }
+	}
+
+	// Mouse hooks — only if interfaces are valid (patterns may fail on some builds)
+	if (Interfaces::m_pInput != nullptr)
+		SubscribeHook(Detours::MouseInputEnabled.Init(&hkMouseInputEnabled, Interfaces::m_pInput, 19));
+
+	if (Interfaces::m_pInputSystem != nullptr)
+		SubscribeHook(Detours::IsRelativeMouseMode.Init(&hkIsRelativeMouseMode, Interfaces::m_pInputSystem, 76));
 
 	/*
 	// --- ALL OTHER HOOKS DISABLED (menu-only mode) ---
-	// Re-enable one by one after menu works without crash
 	SubscribeHook(Detours::CreateMovePrePrediction.Init(&hkCreateMovePrePrediction, Interfaces::m_pInput, 5));
 	SubscribeHook(Detours::FrameStageNotify.Init(&hkFrameStageNotify, Interfaces::m_pClient, 36));
 	SubscribeHook(Detours::LevelInit.Init(&hkLevelInit, Interfaces::m_pClientMode, 23));
