@@ -333,15 +333,19 @@ HRESULT WINAPI Hooks::hkPresent(IDXGISwapChain* pSwapChain, UINT uSyncInterval, 
 {
 	const auto oPresent = Detours::Present.GetOriginal< decltype(&hkPresent) >();
 
+	// Init Draw here — guaranteed DX11 is ready at this point
+	if (!Draw::m_bInitialized)
+		Draw::Setup(Interfaces::m_pDevice, Interfaces::m_pDeviceContext);
+
 	if (Interfaces::m_pRenderTargetView == nullptr)
 		Interfaces::CreateRenderTarget();
 
 	if (Interfaces::m_pRenderTargetView != nullptr)
 		Interfaces::m_pDeviceContext->OMSetRenderTargets(1, &Interfaces::m_pRenderTargetView, nullptr);
 
-	SEH_START 
+	SEH_START
 
-	if (Draw::m_bInitialized) 
+	if (Draw::m_bInitialized)
 	{
 		if (!Gui::m_bInitialized)
 			Gui::Initialize();
@@ -350,38 +354,34 @@ HRESULT WINAPI Hooks::hkPresent(IDXGISwapChain* pSwapChain, UINT uSyncInterval, 
 		ImGui_ImplWin32_NewFrame();
 		ImGui::NewFrame();
 
+		// --- MENU-ONLY MODE: only render the menu, no features ---
 		menu->render();
 
+		/*
+		// Disabled until menu works without crash:
 		g_Movement->RenderAutoRetreat();
 		g_AntiAim->DrawMouseOverrideIndicator();
-
 		g_Overlay->Watermark();
-		//g_Overlay->KeybindList();
 		g_Overlay->SpectatorsList();
 		g_Overlay->Indicators();
 		Gui::DrawHitLogs();
-
 		PlayerESP::DrawDamageIndicators();
 		PlayerESP::HitMarker();
-
 		g_WorldModulation->Exposure(Globals::m_pLocalPlayerPawn);
-
 		g_ShotHandler->OnPresent();
-
 		Scope::Run();
+		*/
 
 		Draw::pBackgroundDrawList = ImGui::GetBackgroundDrawList();
-
 		Draw::RenderDrawData(Draw::pBackgroundDrawList);
 		ImGui::EndFrame();
 		ImGui::Render();
-
 		ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
 	}
 
-    SEH_END
+	SEH_END
 
-	return oPresent(Interfaces::m_pSwapChain->pDXGISwapChain, uSyncInterval, uFlags); //ReturnAddressSpoofer::SpoofCall(ReturnAddressSpoofGadgets::m_pGameOverlayGadget, oPresent, Interfaces::m_pSwapChain->pDXGISwapChain, uSyncInterval, uFlags);
+	return oPresent(Interfaces::m_pSwapChain->pDXGISwapChain, uSyncInterval, uFlags);
 }
 
 HRESULT FASTCALL Hooks::hkResizeBuffers(IDXGISwapChain* pSwapChain, std::uint32_t nBufferCount, std::uint32_t nWidth, std::uint32_t nHeight, DXGI_FORMAT newFormat, std::uint32_t nFlags)
