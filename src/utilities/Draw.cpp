@@ -1,8 +1,36 @@
 #include "../Precompiled.h"
-#include <D3DX11tex.h>
 #include "../gui/new/new_menu.h"
 #include "../gui/new/new_imagess.h"
-#pragma comment(lib, "D3DX11.lib")
+#define STB_IMAGE_IMPLEMENTATION
+#include "../../ext/stb/stb_image.h"
+
+// Load texture from raw PNG/JPG memory using stb_image + native D3D11
+static bool LoadTextureFromMemory(ID3D11Device* pDevice, const void* pData, size_t nSize, ID3D11ShaderResourceView** ppSRV)
+{
+	if (!pData || !nSize || !ppSRV) return false;
+	int w = 0, h = 0, ch = 0;
+	unsigned char* px = stbi_load_from_memory(reinterpret_cast<const stbi_uc*>(pData), static_cast<int>(nSize), &w, &h, &ch, 4);
+	if (!px) return false;
+	D3D11_TEXTURE2D_DESC desc = {};
+	desc.Width = w; desc.Height = h; desc.MipLevels = 1; desc.ArraySize = 1;
+	desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+	desc.SampleDesc.Count = 1;
+	desc.Usage = D3D11_USAGE_DEFAULT;
+	desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+	D3D11_SUBRESOURCE_DATA init = {};
+	init.pSysMem = px; init.SysMemPitch = w * 4;
+	ID3D11Texture2D* pTex = nullptr;
+	HRESULT hr = pDevice->CreateTexture2D(&desc, &init, &pTex);
+	stbi_image_free(px);
+	if (FAILED(hr)) return false;
+	D3D11_SHADER_RESOURCE_VIEW_DESC srv = {};
+	srv.Format = desc.Format;
+	srv.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+	srv.Texture2D.MipLevels = 1;
+	hr = pDevice->CreateShaderResourceView(pTex, &srv, ppSRV);
+	pTex->Release();
+	return SUCCEEDED(hr);
+}
 
 void Draw::Setup(ID3D11Device* pDevice, ID3D11DeviceContext* pDeviceContext)
 {
@@ -16,19 +44,18 @@ void Draw::Setup(ID3D11Device* pDevice, ID3D11DeviceContext* pDeviceContext)
 	ImGui_ImplWin32_Init(Input::m_hWindow);
 	ImGui_ImplDX11_Init(pDevice, pDeviceContext);
 
-	D3DX11_IMAGE_LOAD_INFO info; ID3DX11ThreadPump* pump{ nullptr };
-	if (pic::aimbot == nullptr) D3DX11CreateShaderResourceViewFromMemory(pDevice, aimbot, sizeof(aimbot), &info, pump, &pic::aimbot, 0);
-	if (pic::visuals == nullptr) D3DX11CreateShaderResourceViewFromMemory(pDevice, visuals, sizeof(visuals), &info, pump, &pic::visuals, 0);
-	if (pic::skins == nullptr) D3DX11CreateShaderResourceViewFromMemory(pDevice, skins, sizeof(skins), &info, pump, &pic::skins, 0);
-	if (pic::settings == nullptr) D3DX11CreateShaderResourceViewFromMemory(pDevice, settings, sizeof(settings), &info, pump, &pic::settings, 0);
+	if (pic::aimbot == nullptr) LoadTextureFromMemory(pDevice, aimbot, sizeof(aimbot), &pic::aimbot);
+	if (pic::visuals == nullptr) LoadTextureFromMemory(pDevice, visuals, sizeof(visuals), &pic::visuals);
+	if (pic::skins == nullptr) LoadTextureFromMemory(pDevice, skins, sizeof(skins), &pic::skins);
+	if (pic::settings == nullptr) LoadTextureFromMemory(pDevice, settings, sizeof(settings), &pic::settings);
 
-	if (pic::combo_widget == nullptr) D3DX11CreateShaderResourceViewFromMemory(pDevice, combo_widget, sizeof(combo_widget), &info, pump, &pic::combo_widget, 0);
-	if (pic::input_widget == nullptr) D3DX11CreateShaderResourceViewFromMemory(pDevice, input_widget, sizeof(input_widget), &info, pump, &pic::input_widget, 0);
+	if (pic::combo_widget == nullptr) LoadTextureFromMemory(pDevice, combo_widget, sizeof(combo_widget), &pic::combo_widget);
+	if (pic::input_widget == nullptr) LoadTextureFromMemory(pDevice, input_widget, sizeof(input_widget), &pic::input_widget);
 
-	if (pic::menu_settings_icon == nullptr) D3DX11CreateShaderResourceViewFromMemory(pDevice, menu_settings_icon, sizeof(menu_settings_icon), &info, pump, &pic::menu_settings_icon, 0);
+	if (pic::menu_settings_icon == nullptr) LoadTextureFromMemory(pDevice, menu_settings_icon, sizeof(menu_settings_icon), &pic::menu_settings_icon);
 
-	if (pic::circle_success == nullptr) D3DX11CreateShaderResourceViewFromMemory(pDevice, circle_success, sizeof(circle_success), &info, pump, &pic::circle_success, 0);
-	if (pic::circle_error == nullptr) D3DX11CreateShaderResourceViewFromMemory(pDevice, circle_error, sizeof(circle_error), &info, pump, &pic::circle_error, 0);
+	if (pic::circle_success == nullptr) LoadTextureFromMemory(pDevice, circle_success, sizeof(circle_success), &pic::circle_success);
+	if (pic::circle_error == nullptr) LoadTextureFromMemory(pDevice, circle_error, sizeof(circle_error), &pic::circle_error);
 
 	blurEffect.Initialize(pDevice, pDeviceContext);
 
