@@ -2,21 +2,17 @@
 #include <fstream>
 #include "features/visuals/StringForSkyboxes.h"
 
-// ── debug helpers ────────────────────────────────────────────────────────────
-// g_hLog: console window that stays alive even after game crash
+// ── debug log ────────────────────────────────────────────────────────────────
 static HANDLE g_hLogFile = INVALID_HANDLE_VALUE;
 
 static void VexLog(const char* msg)
 {
-    // 1. Write to console (AllocConsole keeps it alive after crash)
     if (HANDLE hCon = GetStdHandle(STD_OUTPUT_HANDLE); hCon && hCon != INVALID_HANDLE_VALUE)
     {
         DWORD w = 0;
         WriteConsoleA(hCon, msg, (DWORD)strlen(msg), &w, nullptr);
         WriteConsoleA(hCon, "\n", 1, &w, nullptr);
     }
-
-    // 2. Write to file in %TEMP%
     if (g_hLogFile != INVALID_HANDLE_VALUE)
     {
         DWORD w = 0;
@@ -27,14 +23,11 @@ static void VexLog(const char* msg)
 
 static void VexLogInit()
 {
-    // Open a console window that survives game crash
     AllocConsole();
     SetConsoleTitleA("vexium debug log");
-    // Redirect stdout so printf/cout also work
     FILE* f = nullptr;
     freopen_s(&f, "CONOUT$", "w", stdout);
 
-    // Also open log file in %TEMP%
     char path[MAX_PATH];
     DWORD len = GetTempPathA(MAX_PATH, path);
     if (len > 0 && len < MAX_PATH - 20)
@@ -43,7 +36,6 @@ static void VexLogInit()
         g_hLogFile = CreateFileA(path, GENERIC_WRITE, FILE_SHARE_READ,
             nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
     }
-
     VexLog("=== vexium debug log started ===");
     VexLog("DllMain -> DLL_PROCESS_ATTACH");
 }
@@ -53,6 +45,7 @@ DWORD WINAPI OnDllAttach(LPVOID lpParameter)
 {
     VexLog("OnDllAttach entered");
 
+    // Wait for engine DLLs to be ready
     VexLog("waiting for navsystem...");
     while (!Memory::GetModuleBaseHandle(NAVSYSTEM_DLL))
         std::this_thread::sleep_for(std::chrono::milliseconds(500));
@@ -60,10 +53,9 @@ DWORD WINAPI OnDllAttach(LPVOID lpParameter)
 
     try
     {
-#ifdef DEBUG_CONSOLE
-        if (!Logging::Attach(X("vexium.cc")))
-            throw std::runtime_error(X("failed to attach console"));
-#endif
+        // --- MENU-ONLY MODE ---
+        // Only init what's needed to show the menu without crashing.
+        // Re-enable other systems one by one after menu works.
 
         VexLog("Config::Setup...");
         if (!Config::Setup(X("Default.json")))
@@ -73,6 +65,26 @@ DWORD WINAPI OnDllAttach(LPVOID lpParameter)
         if (!Memory::Setup())
             throw std::runtime_error(X("failed to setup memory"));
 
+        VexLog("Interfaces::Setup...");
+        if (!Interfaces::Setup())
+            throw std::runtime_error(X("failed to get interfaces"));
+
+        VexLog("Input::Setup...");
+        if (!Input::Setup())
+            throw std::runtime_error(X("failed to setup inputs"));
+
+        VexLog("Draw::Setup...");
+        if (!Draw::m_bInitialized)
+            Draw::Setup(Interfaces::m_pDevice, Interfaces::m_pDeviceContext);
+
+        VexLog("Hooks::Setup...");
+        if (!Hooks::Setup())
+            throw std::runtime_error(X("failed to setup hooks"));
+
+        VexLog("=== MENU-ONLY MODE LOADED OK ===");
+
+        /*
+        // --- DISABLED UNTIL MENU WORKS ---
         VexLog("Math::Setup...");
         if (!Math::Setup())
             throw std::runtime_error(X("failed to setup math"));
@@ -85,10 +97,6 @@ DWORD WINAPI OnDllAttach(LPVOID lpParameter)
         if (!ReturnAddressSpoofGadgets::FindGadgets())
             throw std::runtime_error(X("failed to find gadgets"));
 
-        VexLog("Interfaces::Setup...");
-        if (!Interfaces::Setup())
-            throw std::runtime_error(X("failed to get interfaces"));
-
         VexLog("Schema::Setup...");
         if (!Schema::Setup())
             throw std::runtime_error(X("failed to dump schema"));
@@ -97,26 +105,13 @@ DWORD WINAPI OnDllAttach(LPVOID lpParameter)
         if (!Convar::Setup())
             throw std::runtime_error(X("failed to setup convars"));
 
-        VexLog("Input::Setup...");
-        if (!Input::Setup())
-            throw std::runtime_error(X("failed to setup inputs"));
-
-        VexLog("Draw::Setup...");
-        if (!Draw::m_bInitialized)
-            Draw::Setup(Interfaces::m_pDevice, Interfaces::m_pDeviceContext);
-
         VexLog("Chams::Init...");
         g_Chams->Init();
-
-        VexLog("Hooks::Setup...");
-        if (!Hooks::Setup())
-            throw std::runtime_error(X("failed to setup hooks"));
 
         VexLog("EventListener::Setup...");
         Interfaces::m_pCvar->UnlockHiddenCVars();
         Utilities::m_EventListener.Setup({ X("round_start"), X("add_bullet_hit_marker"), X("bullet_impact"), X("player_hurt"), X("player_death"), X("weapon_fire"), X("vote_cast"), X("vote_started"), X("item_purchase"), X("bomb_defused"), X("bomb_begindefuse"), X("bomb_planted"), X("bomb_beginplant") });
-
-        VexLog("=== ALL DONE — cheat loaded OK ===");
+        */
     }
     catch (const std::exception& ex)
     {
@@ -147,7 +142,7 @@ DWORD WINAPI OnDllDetach(LPVOID lpParameter)
     Gui::m_bOpen = false;
     Gui::m_bInitialized = false;
 
-    Utilities::m_EventListener.Destroy();
+    // Utilities::m_EventListener.Destroy(); // disabled in menu-only mode
     Draw::Destroy();
     Input::Restore();
     Hooks::Destroy();
@@ -166,7 +161,7 @@ BOOL WINAPI DllMain(HMODULE hModule, DWORD dwReason, LPVOID lpReserved)
 {
     if (dwReason == DLL_PROCESS_ATTACH)
     {
-        VexLogInit();   // open console + log file immediately in DllMain
+        VexLogInit();
 
         LI_FN(DisableThreadLibraryCalls)(hModule);
         Globals::m_hDll = hModule;
