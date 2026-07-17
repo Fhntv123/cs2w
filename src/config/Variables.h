@@ -351,7 +351,7 @@ public:
 		C_ADD_VARIABLE(Color, m_colOnShotSkeletonBones, Color(255, 255, 255, 255));
 
 		C_ADD_VARIABLE(bool, m_bEnableESP, true);
-		C_ADD_VARIABLE(bool, m_bEnableBoxESP, false);
+		C_ADD_VARIABLE(bool, m_bEnableBoxESP, true);
 		C_ADD_VARIABLE(bool, m_bEnableSkeletonESP, false);
 		C_ADD_VARIABLE(bool, m_bEnableBacktrackSkeletonESP, false);
 		C_ADD_VARIABLE(bool, m_bEnableNameESP, false);
