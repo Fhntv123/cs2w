@@ -358,13 +358,13 @@ HRESULT WINAPI Hooks::hkPresent(IDXGISwapChain* pSwapChain, UINT uSyncInterval, 
 	const auto oPresent = Detours::Present.GetOriginal< decltype(&hkPresent) >();
 
 	// Init Draw here — guaranteed DX11 is ready at this point
-	if (!Draw::m_bInitialized)
+	if (!Draw::m_bInitialized && Interfaces::m_pDevice != nullptr && Interfaces::m_pDeviceContext != nullptr)
 		Draw::Setup(Interfaces::m_pDevice, Interfaces::m_pDeviceContext);
 
 	if (Interfaces::m_pRenderTargetView == nullptr)
 		Interfaces::CreateRenderTarget();
 
-	if (Interfaces::m_pRenderTargetView != nullptr)
+	if (Interfaces::m_pRenderTargetView != nullptr && Interfaces::m_pDeviceContext != nullptr)
 		Interfaces::m_pDeviceContext->OMSetRenderTargets(1, &Interfaces::m_pRenderTargetView, nullptr);
 
 	SEH_START
