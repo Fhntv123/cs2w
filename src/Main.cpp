@@ -1,4 +1,5 @@
 #include "Precompiled.h"
+#include <fstream>
 #include "features/visuals/StringForSkyboxes.h"
 
 DWORD WINAPI OnDllAttach(LPVOID lpParameter)
