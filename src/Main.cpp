@@ -4,8 +4,22 @@
 
 DWORD WINAPI OnDllAttach(LPVOID lpParameter)
 {
+    // Early debug log — written before anything else to confirm DLL entry
+    {
+        std::ofstream dbg("C:\\vexium_log.txt", std::ios::app);
+        dbg << "[vexium] OnDllAttach entered\n";
+        dbg.flush();
+    }
+
     while (!Memory::GetModuleBaseHandle(NAVSYSTEM_DLL))
         std::this_thread::sleep_for(std::chrono::milliseconds(500));
+
+    // Log each major init step so we know exactly where a crash happens
+    auto dbgLog = [](const char* msg) {
+        std::ofstream dbg("C:\\vexium_log.txt", std::ios::app);
+        dbg << "[vexium] " << msg << "\n";
+        dbg.flush();
+    };
 
     try
     {
@@ -15,24 +29,31 @@ DWORD WINAPI OnDllAttach(LPVOID lpParameter)
 #endif        
         //Downloader->Run();
 
+        dbgLog("Config::Setup...");
         if (!Config::Setup(X("Default.json")))
             throw std::runtime_error(X("failed to setup config"));
 
+        dbgLog("Memory::Setup...");
         if (!Memory::Setup())
             throw std::runtime_error(X("failed to setup memory"));
 
+        dbgLog("Math::Setup...");
         if (!Math::Setup())
             throw std::runtime_error(X("failed to setup"));
 
+        dbgLog("Functions::Setup...");
         if (!Functions::Setup())
             throw std::runtime_error(X("failed to setup functions"));
 
+        dbgLog("ReturnAddressSpoofGadgets::FindGadgets...");
         if (!ReturnAddressSpoofGadgets::FindGadgets())
             throw std::runtime_error(X("failed to find gadgets"));
 
+        dbgLog("Interfaces::Setup...");
         if (!Interfaces::Setup())
             throw std::runtime_error(X("failed to get interfaces"));
 
+        dbgLog("Schema::Setup...");
         if (!Schema::Setup())
             throw std::runtime_error(X("failed to dump schema"));
 
@@ -41,12 +62,15 @@ DWORD WINAPI OnDllAttach(LPVOID lpParameter)
         //   throw std::runtime_error(X("failed to dump convars"));
         //#endif
 
+        dbgLog("Convar::Setup...");
         if (!Convar::Setup())
             throw std::runtime_error(X("failed to setup convars"));
 
+        dbgLog("Input::Setup...");
         if (!Input::Setup())
             throw std::runtime_error(X("failed to setup inputs"));
 
+        dbgLog("Draw::Setup...");
         if (!Draw::m_bInitialized)
             Draw::Setup(Interfaces::m_pDevice, Interfaces::m_pDeviceContext);
 
@@ -54,11 +78,13 @@ DWORD WINAPI OnDllAttach(LPVOID lpParameter)
 
         //g_WorldModulation->LoadDefaultSkyboxes();
 
+        dbgLog("Chams::Init...");
         g_Chams->Init();
 
         //if (!InventoryChanger::DumpAllSkins())
         //    throw std::runtime_error(X("failed to dump all skins"));
 
+        dbgLog("Hooks::Setup...");
         if (!Hooks::Setup())
             throw std::runtime_error(X("failed to setup hooks"));
 
