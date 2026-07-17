@@ -1,6 +1,18 @@
 #pragma once
 
-struct GrenadePathPoint_t;
+struct GrenadePathPoint_t
+{
+	Vector m_vPos;
+	int m_nTick;
+
+	GrenadePathPoint_t( Vector vPos, int nTick ) : m_vPos( vPos ), m_nTick( nTick ) { }
+
+	bool HasPassed( int currentTick ) const
+	{
+		return currentTick > m_nTick;
+	}
+};
+
 struct GrenadePredictionObject_t
 {
 	Vector m_vInitialPosition;
@@ -17,19 +29,6 @@ struct GrenadePredictionObject_t
 	void Draw( Color cColor, bool bOverlay, bool bEffects );
 };
 inline std::vector < GrenadePredictionObject_t > s_vecPredictedGrenades;
-
-struct GrenadePathPoint_t
-{
-	Vector m_vPos;
-	int m_nTick;
-
-	GrenadePathPoint_t( Vector vPos, int nTick ) : m_vPos( vPos ), m_nTick( nTick ) { }
-
-	bool HasPassed( int currentTick ) const
-	{
-		return currentTick > m_nTick;
-	}
-};
 
 class CGrenadePrediction
 {
