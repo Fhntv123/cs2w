@@ -218,7 +218,10 @@ bool Interfaces::Setup()
 	m_pPVSManager = reinterpret_cast<CEnginePVSManager*>(Memory::ResolveRelativeAddress(Memory::FindPattern(ENGINE2_DLL, X("48 8D 0D ? ? ? ? 33 D2 FF 50")), 0x3, 0x7));
 	bSuccess &= (m_pPVSManager != nullptr);
 
-	m_pGameEventManager = *reinterpret_cast<IGameEventManager2**>(Memory::ResolveRelativeAddress(Memory::GetVFunc<std::uint8_t*>(m_pClient, 14U) + 0x3E, 0x3, 0x7));
+	if (m_pClient != nullptr)
+	{
+		m_pGameEventManager = *reinterpret_cast<IGameEventManager2**>(Memory::ResolveRelativeAddress(Memory::GetVFunc<std::uint8_t*>(m_pClient, 14U) + 0x3E, 0x3, 0x7));
+	}
 	bSuccess &= (m_pGameEventManager != nullptr);
 
 	m_pGameRules = *reinterpret_cast<C_CSGameRules**>(Memory::GetAbsoluteAddress(Memory::FindPattern(CLIENT_DLL, X("48 8B 1D ? ? ? ? 48 8D 54 24 ? 0F 28 D0 48 8D 4C 24 ?")), 0x3));
@@ -236,16 +239,16 @@ bool Interfaces::Setup()
 	const HSteamPipe hSteamPipe = reinterpret_cast<std::add_pointer_t<HSteamPipe()>>(Memory::GetExportAddress(hSteamAPI, X("SteamAPI_GetHSteamPipe")))();
 	bSuccess &= (hSteamUser != NULL);
 
-	m_pSteamGameCoordinator = static_cast<ISteamGameCoordinator*>(m_pSteamClient->GetISteamGenericInterface(hSteamUser, hSteamPipe, STEAMGAMECOORDINATOR_INTERFACE_VERSION));
+	if (m_pSteamClient != nullptr)
+	{
+		m_pSteamGameCoordinator = static_cast<ISteamGameCoordinator*>(m_pSteamClient->GetISteamGenericInterface(hSteamUser, hSteamPipe, STEAMGAMECOORDINATOR_INTERFACE_VERSION));
+		m_pSteamFriends = m_pSteamClient->GetISteamFriends(hSteamUser, hSteamPipe, STEAMFRIENDS_INTERFACE_VERSION);
+		m_pSteamUtils = m_pSteamClient->GetISteamUtils(hSteamUser, STEAMUTILS_INTERFACE_VERSION);
+		m_pSteamMatchmaking = m_pSteamClient->GetISteamMatchmaking(hSteamUser, hSteamPipe, STEAMMATCHMAKING_INTERFACE_VERSION);
+	}
 	bSuccess &= (m_pSteamGameCoordinator != nullptr);
-
-	m_pSteamFriends = m_pSteamClient->GetISteamFriends(hSteamUser, hSteamPipe, STEAMFRIENDS_INTERFACE_VERSION);
 	bSuccess &= (m_pSteamFriends != nullptr);
-
-	m_pSteamUtils = m_pSteamClient->GetISteamUtils(hSteamUser, STEAMUTILS_INTERFACE_VERSION);
 	bSuccess &= (m_pSteamUtils != nullptr);
-
-	m_pSteamMatchmaking = m_pSteamClient->GetISteamMatchmaking(hSteamUser, hSteamPipe, STEAMMATCHMAKING_INTERFACE_VERSION);
 	bSuccess &= (m_pSteamMatchmaking != nullptr);
 
 	m_pParticleManager = GetGameParticleManager();
