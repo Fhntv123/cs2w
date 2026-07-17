@@ -2,114 +2,127 @@
 #include <fstream>
 #include "features/visuals/StringForSkyboxes.h"
 
-// Pure WinAPI log — works even before CRT/static init, writes to %TEMP%\vexium_log.txt
+// ── debug helpers ────────────────────────────────────────────────────────────
+// g_hLog: console window that stays alive even after game crash
+static HANDLE g_hLogFile = INVALID_HANDLE_VALUE;
+
 static void VexLog(const char* msg)
 {
+    // 1. Write to console (AllocConsole keeps it alive after crash)
+    if (HANDLE hCon = GetStdHandle(STD_OUTPUT_HANDLE); hCon && hCon != INVALID_HANDLE_VALUE)
+    {
+        DWORD w = 0;
+        WriteConsoleA(hCon, msg, (DWORD)strlen(msg), &w, nullptr);
+        WriteConsoleA(hCon, "\n", 1, &w, nullptr);
+    }
+
+    // 2. Write to file in %TEMP%
+    if (g_hLogFile != INVALID_HANDLE_VALUE)
+    {
+        DWORD w = 0;
+        WriteFile(g_hLogFile, msg, (DWORD)strlen(msg), &w, nullptr);
+        WriteFile(g_hLogFile, "\n", 1, &w, nullptr);
+    }
+}
+
+static void VexLogInit()
+{
+    // Open a console window that survives game crash
+    AllocConsole();
+    SetConsoleTitleA("vexium debug log");
+    // Redirect stdout so printf/cout also work
+    FILE* f = nullptr;
+    freopen_s(&f, "CONOUT$", "w", stdout);
+
+    // Also open log file in %TEMP%
     char path[MAX_PATH];
     DWORD len = GetTempPathA(MAX_PATH, path);
-    if (len == 0 || len >= MAX_PATH) return;
-    // append filename
-    const char* fname = "vexium_log.txt";
-    if (len + strlen(fname) >= MAX_PATH) return;
-    memcpy(path + len, fname, strlen(fname) + 1);
+    if (len > 0 && len < MAX_PATH - 20)
+    {
+        lstrcatA(path, "vexium_log.txt");
+        g_hLogFile = CreateFileA(path, GENERIC_WRITE, FILE_SHARE_READ,
+            nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    }
 
-    HANDLE hFile = CreateFileA(path, GENERIC_WRITE, FILE_SHARE_READ, nullptr,
-        OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
-    if (hFile == INVALID_HANDLE_VALUE) return;
-    SetFilePointer(hFile, 0, nullptr, FILE_END);
-    DWORD written = 0;
-    WriteFile(hFile, msg, (DWORD)strlen(msg), &written, nullptr);
-    WriteFile(hFile, "\n", 1, &written, nullptr);
-    CloseHandle(hFile);
+    VexLog("=== vexium debug log started ===");
+    VexLog("DllMain -> DLL_PROCESS_ATTACH");
 }
+// ─────────────────────────────────────────────────────────────────────────────
 
 DWORD WINAPI OnDllAttach(LPVOID lpParameter)
 {
-    VexLog("[vexium] OnDllAttach entered");
+    VexLog("OnDllAttach entered");
 
-    VexLog("[vexium] waiting for navsystem...");
+    VexLog("waiting for navsystem...");
     while (!Memory::GetModuleBaseHandle(NAVSYSTEM_DLL))
         std::this_thread::sleep_for(std::chrono::milliseconds(500));
-    VexLog("[vexium] navsystem ready");
+    VexLog("navsystem ready");
 
     try
     {
 #ifdef DEBUG_CONSOLE
         if (!Logging::Attach(X("vexium.cc")))
             throw std::runtime_error(X("failed to attach console"));
-#endif        
-        //Downloader->Run();
+#endif
 
-        VexLog("[vexium] Config::Setup...");
+        VexLog("Config::Setup...");
         if (!Config::Setup(X("Default.json")))
             throw std::runtime_error(X("failed to setup config"));
 
-        VexLog("[vexium] Memory::Setup...");
+        VexLog("Memory::Setup...");
         if (!Memory::Setup())
             throw std::runtime_error(X("failed to setup memory"));
 
-        VexLog("[vexium] Math::Setup...");
+        VexLog("Math::Setup...");
         if (!Math::Setup())
-            throw std::runtime_error(X("failed to setup"));
+            throw std::runtime_error(X("failed to setup math"));
 
-        VexLog("[vexium] Functions::Setup...");
+        VexLog("Functions::Setup...");
         if (!Functions::Setup())
             throw std::runtime_error(X("failed to setup functions"));
 
-        VexLog("[vexium] ReturnAddressSpoofGadgets::FindGadgets...");
+        VexLog("ReturnAddressSpoofGadgets::FindGadgets...");
         if (!ReturnAddressSpoofGadgets::FindGadgets())
             throw std::runtime_error(X("failed to find gadgets"));
 
-        VexLog("[vexium] Interfaces::Setup...");
+        VexLog("Interfaces::Setup...");
         if (!Interfaces::Setup())
             throw std::runtime_error(X("failed to get interfaces"));
 
-        VexLog("[vexium] Schema::Setup...");
+        VexLog("Schema::Setup...");
         if (!Schema::Setup())
             throw std::runtime_error(X("failed to dump schema"));
 
-        //#ifdef _DEBUG
-        //if (!Convar::Dump(X(L"Convars.txt")))
-        //   throw std::runtime_error(X("failed to dump convars"));
-        //#endif
-
-        VexLog("[vexium] Convar::Setup...");
+        VexLog("Convar::Setup...");
         if (!Convar::Setup())
             throw std::runtime_error(X("failed to setup convars"));
 
-        VexLog("[vexium] Input::Setup...");
+        VexLog("Input::Setup...");
         if (!Input::Setup())
             throw std::runtime_error(X("failed to setup inputs"));
 
-        VexLog("[vexium] Draw::Setup...");
+        VexLog("Draw::Setup...");
         if (!Draw::m_bInitialized)
             Draw::Setup(Interfaces::m_pDevice, Interfaces::m_pDeviceContext);
 
-        //STR::CreateDirectories();
-
-        //g_WorldModulation->LoadDefaultSkyboxes();
-
-        VexLog("[vexium] Chams::Init...");
+        VexLog("Chams::Init...");
         g_Chams->Init();
 
-        //if (!InventoryChanger::DumpAllSkins())
-        //    throw std::runtime_error(X("failed to dump all skins"));
-
-        VexLog("[vexium] Hooks::Setup...");
+        VexLog("Hooks::Setup...");
         if (!Hooks::Setup())
             throw std::runtime_error(X("failed to setup hooks"));
 
-        VexLog("[vexium] EventListener::Setup...");
+        VexLog("EventListener::Setup...");
         Interfaces::m_pCvar->UnlockHiddenCVars();
-
         Utilities::m_EventListener.Setup({ X("round_start"), X("add_bullet_hit_marker"), X("bullet_impact"), X("player_hurt"), X("player_death"), X("weapon_fire"), X("vote_cast"), X("vote_started"), X("item_purchase"), X("bomb_defused"), X("bomb_begindefuse"), X("bomb_planted"), X("bomb_beginplant") });
 
-        VexLog("[vexium] ALL DONE — cheat loaded successfully");
+        VexLog("=== ALL DONE — cheat loaded OK ===");
     }
     catch (const std::exception& ex)
     {
-        VexLog("[vexium] EXCEPTION:");
-        VexLog(ex.what());
+        char buf[512];
+        wsprintfA(buf, "EXCEPTION: %s", ex.what());
+        VexLog(buf);
 
         Logging::PushConsoleColor(FOREGROUND_INTENSE_RED);
         Logging::Print(X("[error] {}"), ex.what());
@@ -131,12 +144,10 @@ DWORD WINAPI OnDllDetach(LPVOID lpParameter)
         std::this_thread::sleep_for(std::chrono::milliseconds(500));
 
     Globals::m_bIsUnloading = true;
-
     Gui::m_bOpen = false;
     Gui::m_bInitialized = false;
 
     Utilities::m_EventListener.Destroy();
-
     Draw::Destroy();
     Input::Restore();
     Hooks::Destroy();
@@ -155,13 +166,12 @@ BOOL WINAPI DllMain(HMODULE hModule, DWORD dwReason, LPVOID lpReserved)
 {
     if (dwReason == DLL_PROCESS_ATTACH)
     {
-        VexLog("[vexium] DllMain DLL_PROCESS_ATTACH");
+        VexLogInit();   // open console + log file immediately in DllMain
 
         LI_FN(DisableThreadLibraryCalls)(hModule);
-
         Globals::m_hDll = hModule;
 
-        VexLog("[vexium] CreateThread -> OnDllAttach");
+        VexLog("CreateThread -> OnDllAttach");
         if (HANDLE hThread = LI_FN(CreateThread)(nullptr, 0U, OnDllAttach, hModule, 0UL, nullptr); hThread != nullptr)
             LI_FN(CloseHandle)(hThread);
 
