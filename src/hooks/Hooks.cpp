@@ -42,28 +42,28 @@ bool Hooks::Setup()
 	if (MH_Initialize() != MH_OK)
 		throw std::runtime_error(X("failed initialize minhook"));
 
+	// --- MENU-ONLY MODE: only DX11 hooks, everything else disabled ---
 	SubscribeHook(Detours::Present.Init(&hkPresent, Memory::GetVFunc(Interfaces::m_pSwapChain->pDXGISwapChain, 8U)));
 	SubscribeHook(Detours::ResizeBuffers.Init(&hkResizeBuffers, Memory::GetVFunc(Interfaces::m_pSwapChain->pDXGISwapChain, 13U)));
 
 	IDXGIDevice* pDXGIDevice = NULL;
 	Interfaces::m_pDevice->QueryInterface(IID_PPV_ARGS(&pDXGIDevice));
-
 	IDXGIAdapter* pDXGIAdapter = NULL;
 	pDXGIDevice->GetAdapter(&pDXGIAdapter);
-
 	IDXGIFactory* pIDXGIFactory = NULL;
 	pDXGIAdapter->GetParent(IID_PPV_ARGS(&pIDXGIFactory));
-
 	SubscribeHook(Detours::CreateSwapChain.Init(&hkCreateSwapChain, pIDXGIFactory, 10));
+	pDXGIDevice->Release(); pDXGIDevice = nullptr;
+	pDXGIAdapter->Release(); pDXGIAdapter = nullptr;
+	pIDXGIFactory->Release(); pIDXGIFactory = nullptr;
 
-	pDXGIDevice->Release();
-	pDXGIDevice = nullptr;
-	pDXGIAdapter->Release();
-	pDXGIAdapter = nullptr;
-	pIDXGIFactory->Release();
-	pIDXGIFactory = nullptr;
-
+	// Mouse input — needed so menu is clickable
 	SubscribeHook(Detours::MouseInputEnabled.Init(&hkMouseInputEnabled, Interfaces::m_pInput, 19));
+	SubscribeHook(Detours::IsRelativeMouseMode.Init(&hkIsRelativeMouseMode, Interfaces::m_pInputSystem, 76));
+
+	/*
+	// --- ALL OTHER HOOKS DISABLED (menu-only mode) ---
+	// Re-enable one by one after menu works without crash
 	SubscribeHook(Detours::CreateMovePrePrediction.Init(&hkCreateMovePrePrediction, Interfaces::m_pInput, 5));
 	SubscribeHook(Detours::FrameStageNotify.Init(&hkFrameStageNotify, Interfaces::m_pClient, 36));
 	SubscribeHook(Detours::LevelInit.Init(&hkLevelInit, Interfaces::m_pClientMode, 23));
@@ -81,13 +81,12 @@ bool Hooks::Setup()
 	SubscribeHook(Detours::FlashOverlay.Init(&hkFlashOverlay, Memory::FindPattern(CLIENT_DLL, " 85 D2 0F 88 ? ? ? ? 48 89 4C 24")));
 	SubscribeHook(Detours::CalcViewmodel.Init(&hkCalcViewmodel, Memory::FindPattern(CLIENT_DLL, "40 55 53 56 41 56 41 57 48 8B EC")));
 	SubscribeHook(Detours::AllowCameraAngleChange.Init(&hkAllowCameraAngleChange, Interfaces::m_pInput, 7));
-	SubscribeHook(Detours::IsRelativeMouseMode.Init(&hkIsRelativeMouseMode, Interfaces::m_pInputSystem, 76));
 	SubscribeHook(Detours::DrawAggeregateObject.Init(&hkDrawAggeregateObject, Memory::FindPattern(SCENESYSTEM_DLL, "48 8B C4 4C 89 40 ? 48 89 50 ? 55 53 41 57")));
 	SubscribeHook(Detours::DrawArrayLight.Init(&hkDrawArrayLight, Memory::FindPattern(SCENESYSTEM_DLL, X("48 89 5C 24 ? 48 89 6C 24 ? 48 89 54 24"))));
 	SubscribeHook(Detours::SkyboxDrawarray.Init(&hkSkyboxDrawarray, Memory::FindPattern(SCENESYSTEM_DLL, X("45 85 C9 0F 8E ? ? ? ? 4C 8B DC 55"))));
 	SubscribeHook(Detours::ParticleDrawArray.Init(&hkParticleDrawArray, Memory::FindPattern(PARTICLES_DLL, X("40 55 53 56 57 48 8D 6C 24"))));
 	SubscribeHook(Detours::SomeUtlSymbolFunc.Init(&hkSomeUtlSymbolFunc, Memory::FindPattern(SOUNDSYSTEM_DLL, X("48 89 5C 24 ? 56 48 83 EC ? 48 63 F2"))));
-	SubscribeHook(Detours::ReportHit.Init(&hkReportHit, Memory::FindPattern(CLIENT_DLL, X("40 53 48 83 EC ? 48 8D 05 ? ? ? ? 48 8D 59 ? 48 89 01 F6 03 ? 74 ? 48 8B CB E8 ? ? ? ? 48 8B 0B 0F B6 C1 D0 E8 A8 ? 74 ? 48 8D 59 ? 48 85 DB 74 ? 48 8B CB E8 ? ? ? ? BA ? ? ? ? 48 8B CB 48 83 C4 ? 5B E9 ? ? ? ? 48 83 C4 ? 5B C3 CC CC CC CC CC CC CC CC CC CC 48 89 5C 24 ? 57 48 83 EC ? 48 8D 05 ? ? ? ? 48 8B F9 48 89 01 F6 41 ? ? 74 ? 48 83 C1 ? E8 ? ? ? ? EB ? 48 8B 41 ? 48 83 E0 ? 48 85 C0 75 ? 48 8D 4F ? E8 ? ? ? ? 48 8D 4F ? E8 ? ? ? ? 48 8B 5F ? 0F B6 C3 D0 E8 A8 ? 74 ? 48 83 C3 ? 74 ? 48 8B CB E8 ? ? ? ? BA ? ? ? ? 48 8B CB E8 ? ? ? ? 48 8B 5C 24 ? 48 83 C4 ? 5F C3 CC CC CC CC CC CC 48 89 5C 24 ? 57 48 83 EC ? 48 8D 05 ? ? ? ? 48 8B D9"))));
+	SubscribeHook(Detours::ReportHit.Init(&hkReportHit, Memory::FindPattern(CLIENT_DLL, X("40 53 48 83 EC ? 48 8D 05"))));
 	SubscribeHook(Detours::GeneratePrimitives.Init(&hkGeneratePrimitives, Memory::FindPattern(SCENESYSTEM_DLL, X("48 8B C4 48 89 58 08 48 89 50 10 55 56 57 41 54 41 55 41 56 41 57 48 81 EC ? ? ? ?"))));
 	SubscribeHook(Detours::DrawOverHead.Init(&hkDrawOverHead, Memory::FindPattern(CLIENT_DLL, "40 53 48 83 EC ? 48 8B D9 83 FA ? 75 ? 48 8B 0D ? ? ? ? 48 8D 54 24 ? 48 8B 01 FF 90 ? ? ? ? 8B 10")));
 	SubscribeHook(Detours::DrawCrosshair.Init(&hkDrawCrosshair, Memory::FindPattern(CLIENT_DLL, "48 89 5C 24 08 57 48 83 EC 20 48 8B D9 E8 ?? ?? ?? ?? 48 85")));
@@ -100,10 +99,10 @@ bool Hooks::Setup()
 	SubscribeHook(Detours::ShouldUpdateSequences.Init(&hkShouldUpdateSequences, Memory::FindPattern(ANIMATIONSYSTEM_DLL, "48 89 5C 24 ? 48 89 74 24 ? 57 48 83 EC 20 49 8B 40 48")));
 	SubscribeHook(Detours::DrawAggregateSceneObject.Init(&DrawAggregateSceneObject, Memory::FindPattern(SCENESYSTEM_DLL, "48 8B C4 48 89 50 ? 48 89 48 ? 55 48 8D A8 ? ? ? ? 48 81 EC ? ? ? ? 48 89 58 ? 48 89 70")));
 	SubscribeHook(Detours::SetupMove.Init(&hkSetupMove, Memory::FindPattern(CLIENT_DLL, "48 89 5C 24 ? 48 89 6C 24 ? 56 57 41 56 48 83 EC ? 49 8B F8 4C 8B F2")));
+	*/
 
-	Scope::Hook();
-
-	InitializeThreader();
+	if (MH_EnableHook(MH_ALL_HOOKS) != MH_OK)
+		throw std::runtime_error(X("failed enable hooks"));
 
 	return true;
 }
