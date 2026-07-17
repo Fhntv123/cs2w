@@ -33,11 +33,7 @@ static bool LoadTextureFromMemory(ID3D11Device* pDevice, const void* pData, size
 
 void Draw::Setup(ID3D11Device* pDevice, ID3D11DeviceContext* pDeviceContext)
 {
-	ImGui::SetAllocatorFunctions(
-		[](size_t s, void*) -> void* {return Interfaces::m_pMemAlloc->Alloc(s);},
-		[](void* p, void*) -> void {Interfaces::m_pMemAlloc->Free(p);}
-	);
-
+	// Use standard allocator — CS2 custom allocator (m_pMemAlloc) can crash if not ready
 	ImGui::CreateContext();
 
 	ImGui_ImplWin32_Init(Input::m_hWindow);
