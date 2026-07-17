@@ -1,7 +1,6 @@
 #include "../Precompiled.h"
 #include "../gui/new/new_menu.h"
 #include "../gui/new/new_imagess.h"
-#define STB_IMAGE_IMPLEMENTATION
 #include "../../ext/stb/stb_image.h"
 
 // Load texture from raw PNG/JPG memory using stb_image + native D3D11
