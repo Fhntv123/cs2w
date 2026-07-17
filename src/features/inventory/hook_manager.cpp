@@ -1,0 +1,147 @@
+﻿#include "hook_manager.h"
+#include "logger.h"
+#include "hooks.h"
+#include "memory.h"
+#include "sdk.h"
+#include "interfaces.h"
+#include "entity.h"
+#include "skins.h"
+#include "CCPlayerInventory.h"
+#include "color.hpp"
+#include "i_materialsystem.h"
+
+namespace H
+{
+	bool Setup()
+	{
+		// Initialize MinHook
+		if (const MH_STATUS status = MH_Initialize(); status != MH_OK)
+		{
+			printf("[H] Failed to initialize MinHook: %s\n", MH_StatusToString(status));
+			return false;
+		}
+
+		if (!hkGetAsspectRatio.Create(reinterpret_cast<void*>(M::FindPattern(L"engine2.dll", "48 89 5C 24 08 57 48 83 EC 20 8B FA 48 8D 0D")), &D::GetScreenAspectRatio))
+		{
+			printf("[---] Failed to create GetScreenAspectRatio hook\n");
+			return false;
+		}
+		if (!hkFrameStage.Create(M::get_v_method(I::iclient, 36), &D::hkFrameStage)) {
+			printf("[---] Failed to create hkFrameStage hook\n");
+			return false;
+		}
+		if (!hkEnableCursor.Create(M::get_v_method(I::inputsystem, 76), &D::hkEnableCursor))
+		{
+			printf("[---] Failed to create EnableCursor hook\n");
+			return false;
+		}
+
+		if (!hkEquipItemInLoadout.Create(reinterpret_cast<void*>(M::FindPattern(L"client.dll","48 89 5C 24 ? 48 89 6C 24 ? 48 89 74 24 ? 89 54 24 ? 57 41 54 41 55 41 56 41 57 48 83 EC ? 0F B7 F2" )), &D::hkEquipItemInLoadout)) 
+		{
+			printf("[---] Failed to create hkEquipItemInLoadout hook!\n");
+		}
+
+		//if (!hkBatchList.Create(reinterpret_cast<void*>(M::FindPattern(L"scenesystem.dll", "4C 8B DC 53 48 81 EC ? ? ? ? 83 79")), &D::hkBatchList))
+		//{
+		//	printf("[---] Failed to create hkBatchList hook!\n");
+
+		//}
+
+		if (!hkLevelInit.Create(reinterpret_cast<void*>(M::FindPattern(L"client.dll", "40 55 56 41 56 48 8D 6C 24 ? 48 81 EC ? ? ? ? 48")), &D::hkLevelInit)) {
+			printf("[---] Failed to create hkLevelInit hook!\n");
+		}
+		return true;
+	}
+
+	void Destroy()
+	{
+		printf("[H] Destroying hooks...\n");
+
+		// TODO: Remove your hooks here
+		// Example:
+		// if (hkYourFunction.IsHooked())
+		// {
+		//     hkYourFunction.Remove();
+		//     printf("[+] YourFunction hook removed\n");
+		// }
+		hkCreateMaterial.Remove();
+		hkDrawArray.Remove();
+		hkBatchList.Remove();
+		hkGetAsspectRatio.Remove();
+		hkEquipItemInLoadout.Remove();
+		hkEnableCursor.Remove();
+		hkFrameStage.Remove();
+		if (const MH_STATUS status = MH_Uninitialize(); status != MH_OK)
+		{
+			printf("[---] Failed to uninitialize MinHook: %s\n", MH_StatusToString(status));
+			return;
+		}
+
+		printf("[H] MinHook uninitialized successfully\n");
+	}
+}
+
+
+namespace D
+{
+	void __fastcall hkLevelInit(void* pClientModeShared, const char* szNewMap)
+	{
+		printf("[H] LevelInit called for map: %s\n", szNewMap);
+		I::pvs->Set(false);
+		H::hkLevelInit.GetOriginal()(pClientModeShared, szNewMap);
+	}
+
+
+	void __fastcall GetScreenAspectRatio(void* thisptr, int width, int height) {
+
+		if (SDK::g_ScreenHeight != height || SDK::g_ScreenWidth != width) {
+			SDK::g_ScreenHeight = height;
+			SDK::g_ScreenWidth = width;
+			printf("[D] Screen resized: width=%d, height=%d\n", width, height);
+		}
+		H::hkGetAsspectRatio.GetOriginal()(thisptr, width, height);
+
+	}
+	void __fastcall hkFrameStage(void* _this, int curStage)
+	{
+		//  printf("hk %d\n", curStage);
+		H::hkFrameStage.GetOriginal()(_this, curStage);
+		if (!I::engine && !I::engine->is_in_game()) return;
+		if (curStage == 6) {
+
+
+
+			C_CSPlayerPawn* local_pawn = C_CSPlayerPawn::GetLocalPawn();
+			if (!local_pawn) return;
+			CCSPlayerInventory* inventory = CCSInventoryManager::GetInstance()->GetLocalInventory();
+
+			C_CS2HudModelWeapon* viewModel = local_pawn->GetViewModel();
+			S::set_agent(curStage);
+			S::ApplyKnifeSkins(local_pawn, inventory, viewModel);
+			S::ApplyWeaponSkins(local_pawn, inventory, viewModel);
+			S::ApplyGloves();
+			//skins::set_knife(curStage);
+		}
+	}
+
+
+	void hkEnableCursor(void* thisptr, bool bEnable)
+	{
+		if (!SDK::showMenu) {
+			SDK::cursorlaststate = bEnable;
+		}
+		H::hkEnableCursor.GetOriginal()(thisptr, bEnable);
+	}
+
+	bool __fastcall hkEquipItemInLoadout(void* thisptr, int iTeam, int iSlot, uint64_t iItemID) {
+
+		// Вызываем оригинальную функцию
+		bool result = H::hkEquipItemInLoadout.GetOriginal()(thisptr, iTeam, iSlot, iItemID);
+		S::onEquipItemInLoadout(thisptr, iTeam, iSlot, iItemID);
+
+		return result;
+	}
+
+	
+
+}
