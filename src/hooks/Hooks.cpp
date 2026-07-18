@@ -280,77 +280,114 @@ long Hooks::hkWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 HRESULT WINAPI Hooks::hkPresent(IDXGISwapChain* pSwapChain, UINT uSyncInterval, UINT uFlags)
 {
 	const auto oPresent = Detours::Present.GetOriginal<decltype(&hkPresent)>();
+	if (!oPresent) return E_FAIL;
+	if (!pSwapChain) return E_FAIL;
 
-	// ── Init block: runs once, everything from pSwapChain directly ──────────
-	if (!Draw::m_bInitialized)
+	// Everything wrapped in SEH — any crash returns to original Present
+	__try
 	{
-		ID3D11Device* pDevice = nullptr;
-		if (FAILED(pSwapChain->GetDevice(__uuidof(ID3D11Device), (void**)&pDevice)) || !pDevice)
+		// ── One-time init ────────────────────────────────────────────────────
+		if (!Draw::m_bInitialized)
+		{
+			ID3D11Device* pDevice = nullptr;
+			HRESULT hr = pSwapChain->GetDevice(__uuidof(ID3D11Device), (void**)&pDevice);
+			if (FAILED(hr) || !pDevice)
+				return oPresent(pSwapChain, uSyncInterval, uFlags);
+
+			ID3D11DeviceContext* pContext = nullptr;
+			pDevice->GetImmediateContext(&pContext);
+			if (!pContext)
+			{
+				pDevice->Release();
+				return oPresent(pSwapChain, uSyncInterval, uFlags);
+			}
+
+			DXGI_SWAP_CHAIN_DESC sd{};
+			hr = pSwapChain->GetDesc(&sd);
+			HWND hWnd = SUCCEEDED(hr) ? sd.OutputWindow : nullptr;
+			if (!hWnd || !IsWindow(hWnd))
+			{
+				pContext->Release();
+				pDevice->Release();
+				return oPresent(pSwapChain, uSyncInterval, uFlags);
+			}
+
+			// Create render target view
+			ID3D11Texture2D* pBackBuffer = nullptr;
+			hr = pSwapChain->GetBuffer(0, __uuidof(ID3D11Texture2D), (void**)&pBackBuffer);
+			if (FAILED(hr) || !pBackBuffer)
+			{
+				pContext->Release();
+				pDevice->Release();
+				return oPresent(pSwapChain, uSyncInterval, uFlags);
+			}
+
+			ID3D11RenderTargetView* pRTV = nullptr;
+			hr = pDevice->CreateRenderTargetView(pBackBuffer, nullptr, &pRTV);
+			pBackBuffer->Release();
+			if (FAILED(hr) || !pRTV)
+			{
+				pContext->Release();
+				pDevice->Release();
+				return oPresent(pSwapChain, uSyncInterval, uFlags);
+			}
+
+			// Cache
+			Interfaces::m_pDevice            = pDevice;
+			Interfaces::m_pDeviceContext     = pContext;
+			Interfaces::m_pRenderTargetView  = pRTV;
+			Input::m_hWindow                 = hWnd;
+
+			// WndProc
+			Input::m_pOldWndProc = reinterpret_cast<WNDPROC>(
+				SetWindowLongPtrW(hWnd, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(Hooks::hkWndProc)));
+
+			// ImGui context
+			if (ImGui::GetCurrentContext() == nullptr)
+				ImGui::CreateContext();
+
+			ImGuiIO& io = ImGui::GetIO();
+			io.ConfigFlags |= ImGuiConfigFlags_NoMouseCursorChange;
+			io.IniFilename  = nullptr;
+			io.LogFilename  = nullptr;
+
+			if (!ImGui_ImplWin32_Init(hWnd))
+				return oPresent(pSwapChain, uSyncInterval, uFlags);
+			if (!ImGui_ImplDX11_Init(pDevice, pContext))
+			{
+				ImGui_ImplWin32_Shutdown();
+				return oPresent(pSwapChain, uSyncInterval, uFlags);
+			}
+
+			Draw::m_bInitialized = true;
+		}
+
+		// ── Per-frame ────────────────────────────────────────────────────────
+		if (!Draw::m_bInitialized)
 			return oPresent(pSwapChain, uSyncInterval, uFlags);
 
-		ID3D11DeviceContext* pContext = nullptr;
-		pDevice->GetImmediateContext(&pContext);
-		if (!pContext)
+		if (!Interfaces::m_pDeviceContext || !Interfaces::m_pRenderTargetView)
 			return oPresent(pSwapChain, uSyncInterval, uFlags);
 
-		DXGI_SWAP_CHAIN_DESC sd{};
-		pSwapChain->GetDesc(&sd);
-		HWND hWnd = sd.OutputWindow;
-		if (!hWnd)
-			return oPresent(pSwapChain, uSyncInterval, uFlags);
+		ImGui_ImplDX11_NewFrame();
+		ImGui_ImplWin32_NewFrame();
+		ImGui::NewFrame();
 
-		// Cache into Interfaces so rest of code can use them
-		Interfaces::m_pDevice        = pDevice;
-		Interfaces::m_pDeviceContext = pContext;
+		// SAFE MODE: just a test window to prove hook works
+		// menu->render() and Gui::Initialize() disabled until this works
+		ImGui::Begin("vexium — safe mode");
+		ImGui::Text("hook OK. press INSERT to unload.");
+		ImGui::End();
 
-		// WndProc — set here, not in Input::Setup
-		Input::m_hWindow    = hWnd;
-		Input::m_pOldWndProc = reinterpret_cast<WNDPROC>(
-			SetWindowLongPtrW(hWnd, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(Hooks::hkWndProc)));
+		ImGui::Render();
 
-		// ImGui init
-		ImGui::CreateContext();
-		ImGuiIO& io = ImGui::GetIO();
-		io.ConfigFlags |= ImGuiConfigFlags_NoMouseCursorChange;
-		io.IniFilename  = nullptr;
-
-		ImGui_ImplWin32_Init(hWnd);
-		ImGui_ImplDX11_Init(pDevice, pContext);
-
-		// RenderTarget
-		Interfaces::CreateRenderTarget();
-
-		Draw::m_bInitialized = true;
-	}
-
-	// ── Per-frame ────────────────────────────────────────────────────────────
-	if (!Draw::m_bInitialized)
-		return oPresent(pSwapChain, uSyncInterval, uFlags);
-
-	if (Interfaces::m_pRenderTargetView == nullptr)
-		Interfaces::CreateRenderTarget();
-
-	if (Interfaces::m_pDeviceContext && Interfaces::m_pRenderTargetView)
 		Interfaces::m_pDeviceContext->OMSetRenderTargets(1, &Interfaces::m_pRenderTargetView, nullptr);
-
-	SEH_START
-
-	if (!Gui::m_bInitialized)
-		Gui::Initialize();
-
-	ImGui_ImplDX11_NewFrame();
-	ImGui_ImplWin32_NewFrame();
-	ImGui::NewFrame();
-
-	menu->render();
-
-	Draw::pBackgroundDrawList = ImGui::GetBackgroundDrawList();
-	Draw::RenderDrawData(Draw::pBackgroundDrawList);
-	ImGui::EndFrame();
-	ImGui::Render();
-	ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
-
-	SEH_END
+		ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
+	}
+	__except (EXCEPTION_EXECUTE_HANDLER)
+	{
+		// swallow any crash — never bring the game down
+	}
 
 	return oPresent(pSwapChain, uSyncInterval, uFlags);
 }
