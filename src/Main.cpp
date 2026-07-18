@@ -134,7 +134,10 @@ DWORD WINAPI OnDllAttach(LPVOID lpParameter)
 
             if (FAILED(hr) || !pDummySwap)
             {
-                VexLogFmt("D3D11CreateDeviceAndSwapChain failed hr=0x%08X", hr);
+                {
+                    char hrBuf[32]; wsprintfA(hrBuf, "0x%08X", hr);
+                    VexLogFmt("D3D11CreateDeviceAndSwapChain failed hr=%s", hrBuf);
+                }
                 DestroyWindow(hDummyWnd);
                 __leave;
             }
