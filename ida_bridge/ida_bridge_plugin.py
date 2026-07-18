@@ -98,13 +98,32 @@ def health():
 
 @in_main_thread
 def _info():
-    info = idaapi.get_inf_structure()
+    # Modern API (IDA 7.7+): ida_ida module
+    try:
+        import ida_ida
+        procname = ida_ida.inf_get_procname()
+        min_ea = ida_ida.inf_get_min_ea()
+        max_ea = ida_ida.inf_get_max_ea()
+        if ida_ida.inf_is_64bit():
+            bits = 64
+        elif ida_ida.inf_is_32bit_exactly():
+            bits = 32
+        else:
+            bits = 16
+    except Exception:
+        # Legacy fallback
+        info = idaapi.get_inf_structure()
+        procname = info.procname
+        min_ea = info.min_ea
+        max_ea = info.max_ea
+        bits = 64 if info.is_64bit() else (32 if info.is_32bit() else 16)
     return {
         "input_file": ida_nalt.get_input_file_path(),
-        "processor": info.procname,
-        "bits": 64 if info.is_64bit() else (32 if info.is_32bit() else 16),
-        "min_ea": hex(info.min_ea),
-        "max_ea": hex(info.max_ea),
+        "input_file_name": ida_nalt.get_root_filename(),
+        "processor": procname,
+        "bits": bits,
+        "min_ea": hex(min_ea),
+        "max_ea": hex(max_ea),
     }
 
 @app.get("/info")
