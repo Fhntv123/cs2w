@@ -279,57 +279,80 @@ long Hooks::hkWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 
 HRESULT WINAPI Hooks::hkPresent(IDXGISwapChain* pSwapChain, UINT uSyncInterval, UINT uFlags)
 {
-	const auto oPresent = Detours::Present.GetOriginal< decltype(&hkPresent) >();
+	const auto oPresent = Detours::Present.GetOriginal<decltype(&hkPresent)>();
 
-	// Init Draw here — guaranteed DX11 is ready at this point
-	if (!Draw::m_bInitialized && Interfaces::m_pDevice != nullptr && Interfaces::m_pDeviceContext != nullptr)
-		Draw::Setup(Interfaces::m_pDevice, Interfaces::m_pDeviceContext);
+	// ── Init block: runs once, everything from pSwapChain directly ──────────
+	if (!Draw::m_bInitialized)
+	{
+		ID3D11Device* pDevice = nullptr;
+		if (FAILED(pSwapChain->GetDevice(__uuidof(ID3D11Device), (void**)&pDevice)) || !pDevice)
+			return oPresent(pSwapChain, uSyncInterval, uFlags);
+
+		ID3D11DeviceContext* pContext = nullptr;
+		pDevice->GetImmediateContext(&pContext);
+		if (!pContext)
+			return oPresent(pSwapChain, uSyncInterval, uFlags);
+
+		DXGI_SWAP_CHAIN_DESC sd{};
+		pSwapChain->GetDesc(&sd);
+		HWND hWnd = sd.OutputWindow;
+		if (!hWnd)
+			return oPresent(pSwapChain, uSyncInterval, uFlags);
+
+		// Cache into Interfaces so rest of code can use them
+		Interfaces::m_pDevice        = pDevice;
+		Interfaces::m_pDeviceContext = pContext;
+
+		// WndProc — set here, not in Input::Setup
+		Input::m_hWindow    = hWnd;
+		Input::m_pOldWndProc = reinterpret_cast<WNDPROC>(
+			SetWindowLongPtrW(hWnd, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(Hooks::hkWndProc)));
+
+		// ImGui init
+		ImGui::CreateContext();
+		ImGuiIO& io = ImGui::GetIO();
+		io.ConfigFlags |= ImGuiConfigFlags_NoMouseCursorChange;
+		io.IniFilename  = nullptr;
+
+		ImGui_ImplWin32_Init(hWnd);
+		ImGui_ImplDX11_Init(pDevice, pContext);
+
+		// RenderTarget
+		Interfaces::CreateRenderTarget();
+
+		Draw::m_bInitialized = true;
+	}
+
+	// ── Per-frame ────────────────────────────────────────────────────────────
+	if (!Draw::m_bInitialized)
+		return oPresent(pSwapChain, uSyncInterval, uFlags);
 
 	if (Interfaces::m_pRenderTargetView == nullptr)
 		Interfaces::CreateRenderTarget();
 
-	if (Interfaces::m_pRenderTargetView != nullptr && Interfaces::m_pDeviceContext != nullptr)
+	if (Interfaces::m_pDeviceContext && Interfaces::m_pRenderTargetView)
 		Interfaces::m_pDeviceContext->OMSetRenderTargets(1, &Interfaces::m_pRenderTargetView, nullptr);
 
 	SEH_START
 
-	if (Draw::m_bInitialized)
-	{
-		if (!Gui::m_bInitialized)
-			Gui::Initialize();
+	if (!Gui::m_bInitialized)
+		Gui::Initialize();
 
-		ImGui_ImplDX11_NewFrame();
-		ImGui_ImplWin32_NewFrame();
-		ImGui::NewFrame();
+	ImGui_ImplDX11_NewFrame();
+	ImGui_ImplWin32_NewFrame();
+	ImGui::NewFrame();
 
-		// --- MENU-ONLY MODE: only render the menu, no features ---
-		menu->render();
+	menu->render();
 
-		/*
-		// Disabled until menu works without crash:
-		g_Movement->RenderAutoRetreat();
-		g_AntiAim->DrawMouseOverrideIndicator();
-		g_Overlay->Watermark();
-		g_Overlay->SpectatorsList();
-		g_Overlay->Indicators();
-		Gui::DrawHitLogs();
-		PlayerESP::DrawDamageIndicators();
-		PlayerESP::HitMarker();
-		g_WorldModulation->Exposure(Globals::m_pLocalPlayerPawn);
-		g_ShotHandler->OnPresent();
-		Scope::Run();
-		*/
-
-		Draw::pBackgroundDrawList = ImGui::GetBackgroundDrawList();
-		Draw::RenderDrawData(Draw::pBackgroundDrawList);
-		ImGui::EndFrame();
-		ImGui::Render();
-		ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
-	}
+	Draw::pBackgroundDrawList = ImGui::GetBackgroundDrawList();
+	Draw::RenderDrawData(Draw::pBackgroundDrawList);
+	ImGui::EndFrame();
+	ImGui::Render();
+	ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
 
 	SEH_END
 
-	return oPresent(Interfaces::m_pSwapChain->pDXGISwapChain, uSyncInterval, uFlags);
+	return oPresent(pSwapChain, uSyncInterval, uFlags);
 }
 
 HRESULT FASTCALL Hooks::hkResizeBuffers(IDXGISwapChain* pSwapChain, std::uint32_t nBufferCount, std::uint32_t nWidth, std::uint32_t nHeight, DXGI_FORMAT newFormat, std::uint32_t nFlags)
