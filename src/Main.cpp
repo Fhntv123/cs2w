@@ -52,113 +52,64 @@ DWORD WINAPI OnDllAttach(LPVOID lpParameter)
 {
     VexLog("OnDllAttach entered");
 
-    // Wait for all engine DLLs to be ready
+    // Wait for engine DLLs
     VexLog("waiting for navsystem...");
     while (!Memory::GetModuleBaseHandle(NAVSYSTEM_DLL))
         std::this_thread::sleep_for(std::chrono::milliseconds(500));
     VexLog("navsystem ready");
 
-    // Extra wait — give the game time to fully init DX11 and all modules
-    VexLog("extra wait 2s for DX11 init...");
     std::this_thread::sleep_for(std::chrono::milliseconds(2000));
-    VexLog("wait done");
+    VexLog("extra wait done");
 
     try
     {
-        // ── Config ───────────────────────────────────────────────────────────
         VexLog("Config::Setup...");
         if (!Config::Setup(X("Default.json")))
             throw std::runtime_error(X("failed to setup config"));
         VexLog("Config OK");
 
-        // ── Memory ───────────────────────────────────────────────────────────
         VexLog("Memory::Setup...");
         if (!Memory::Setup())
             throw std::runtime_error(X("failed to setup memory"));
         VexLog("Memory OK");
 
-        // ── Interfaces ───────────────────────────────────────────────────────
-        // NOTE: Interfaces::Setup() scans many patterns. Some may fail on
-        // certain game versions. We do NOT throw on failure — we only require
-        // the DX11 interfaces (m_pSwapChain, m_pDevice) for the menu.
+        // Interfaces: only need m_pSwapChain for vtable[8] hook
+        // partial failure is OK — we only throw if SwapChain is null
         VexLog("Interfaces::Setup...");
-        bool ifacesOk = Interfaces::Setup();
-        if (ifacesOk)
-            VexLog("Interfaces OK (all)");
-        else
-            VexLog("Interfaces PARTIAL — some patterns failed, continuing for menu");
-
-        // Critical check: DX11 must be available for the menu
+        Interfaces::Setup();
         if (Interfaces::m_pSwapChain == nullptr)
-            throw std::runtime_error(X("m_pSwapChain is null — DX11 not ready"));
-        if (Interfaces::m_pDevice == nullptr)
-            throw std::runtime_error(X("m_pDevice is null — DX11 not ready"));
-        VexLog("DX11 interfaces OK");
+            throw std::runtime_error(X("m_pSwapChain null — cannot hook Present"));
+        VexLog("Interfaces OK (SwapChain found)");
 
-        // ── Input (WndProc hook) ──────────────────────────────────────────────
-        VexLog("Input::Setup...");
-        if (!Input::Setup())
-            throw std::runtime_error(X("failed to setup inputs"));
-        VexLog("Input OK");
+        // Input::Setup() removed — WndProc is now set inside hkPresent
+        // from pSwapChain->GetDesc().OutputWindow (guaranteed valid)
 
-        // ── Hooks (DX11 Present/Resize + mouse only) ──────────────────────────
-        // Draw::Setup is called inside hkPresent — guaranteed DX11 ready there
         VexLog("Hooks::Setup...");
         if (!Hooks::Setup())
             throw std::runtime_error(X("failed to setup hooks"));
         VexLog("Hooks OK");
 
-        VexLog("=== MENU-ONLY MODE LOADED OK ===");
-
-        /*
-        // ── DISABLED UNTIL MENU WORKS ─────────────────────────────────────────
-        VexLog("Math::Setup...");
-        if (!Math::Setup())
-            throw std::runtime_error(X("failed to setup math"));
-
-        VexLog("Functions::Setup...");
-        if (!Functions::Setup())
-            throw std::runtime_error(X("failed to setup functions"));
-
-        VexLog("ReturnAddressSpoofGadgets::FindGadgets...");
-        if (!ReturnAddressSpoofGadgets::FindGadgets())
-            throw std::runtime_error(X("failed to find gadgets"));
-
-        VexLog("Schema::Setup...");
-        if (!Schema::Setup())
-            throw std::runtime_error(X("failed to dump schema"));
-
-        VexLog("Convar::Setup...");
-        if (!Convar::Setup())
-            throw std::runtime_error(X("failed to setup convars"));
-
-        VexLog("Chams::Init...");
-        g_Chams->Init();
-
-        VexLog("EventListener::Setup...");
-        Interfaces::m_pCvar->UnlockHiddenCVars();
-        Utilities::m_EventListener.Setup({ X("round_start"), X("add_bullet_hit_marker"),
-            X("bullet_impact"), X("player_hurt"), X("player_death"), X("weapon_fire"),
-            X("vote_cast"), X("vote_started"), X("item_purchase"), X("bomb_defused"),
-            X("bomb_begindefuse"), X("bomb_planted"), X("bomb_beginplant") });
-        */
+        VexLog("=== MENU-ONLY MODE LOADED ===");
     }
     catch (const std::exception& ex)
     {
-        VexLogFmt("EXCEPTION: %s", ex.what());
-
-        Logging::PushConsoleColor(FOREGROUND_INTENSE_RED);
-        Logging::Print(X("[error] {}"), ex.what());
-        Logging::PopConsoleColor();
-
-#ifdef _DEBUG
-        _RPT0(_CRT_ERROR, ex.what());
-#else
-        LI_FN(FreeLibraryAndExitThread)(static_cast<HMODULE>(lpParameter), EXIT_FAILURE);
-#endif
+        VexLog("EXCEPTION:");
+        VexLog(ex.what());
+        FreeLibraryAndExitThread(static_cast<HMODULE>(lpParameter), EXIT_FAILURE);
+        return EXIT_FAILURE;
     }
 
-    return EXIT_FAILURE;
+    // Wait for unload key
+    while (!Input::IsKeyDown(Config::i(g_Variables.m_Gui.m_iUnloadKey)))
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+
+    VexLog("unload key pressed, detaching...");
+    Hooks::Destroy();
+    Input::Restore();
+    Draw::Destroy();
+
+    FreeLibraryAndExitThread(static_cast<HMODULE>(lpParameter), EXIT_SUCCESS);
+    return EXIT_SUCCESS;
 }
 
 DWORD WINAPI OnDllDetach(LPVOID lpParameter)
