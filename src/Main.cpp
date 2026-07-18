@@ -30,10 +30,8 @@ static void VexLogFmt(const char* fmt, const char* val)
 
 static void VexLogInit()
 {
-    AllocConsole();
-    SetConsoleTitleA("vexium debug log");
-    FILE* f = nullptr;
-    freopen_s(&f, "CONOUT$", "w", stdout);
+    // NO AllocConsole — it corrupts the process on repeated inject
+    // Write to file only
 
     char path[MAX_PATH];
     DWORD len = GetTempPathA(MAX_PATH, path);
@@ -46,70 +44,128 @@ static void VexLogInit()
     VexLog("=== vexium debug log started ===");
     VexLog("DllMain -> DLL_PROCESS_ATTACH");
 }
+
 // ─────────────────────────────────────────────────────────────────────────────
 
 DWORD WINAPI OnDllAttach(LPVOID lpParameter)
 {
+    // Guard against double-inject
+    static volatile LONG s_bAttached = 0;
+    if (InterlockedCompareExchange(&s_bAttached, 1, 0) != 0)
+    {
+        FreeLibraryAndExitThread(static_cast<HMODULE>(lpParameter), 0);
+        return 0;
+    }
+
     VexLog("OnDllAttach entered");
 
-    // Wait for engine DLLs
     VexLog("waiting for navsystem...");
+    int waitCount = 0;
     while (!Memory::GetModuleBaseHandle(NAVSYSTEM_DLL))
+    {
         std::this_thread::sleep_for(std::chrono::milliseconds(500));
+        if (++waitCount > 60)  // 30s timeout
+        {
+            VexLog("navsystem timeout — aborting");
+            FreeLibraryAndExitThread(static_cast<HMODULE>(lpParameter), 1);
+            return 1;
+        }
+    }
     VexLog("navsystem ready");
 
-    std::this_thread::sleep_for(std::chrono::milliseconds(2000));
+    std::this_thread::sleep_for(std::chrono::milliseconds(3000));
     VexLog("extra wait done");
 
-    try
+    // ── All setup wrapped in SEH ─────────────────────────────────────────────
+    bool ok = false;
+    __try
     {
         VexLog("Config::Setup...");
         if (!Config::Setup(X("Default.json")))
-            throw std::runtime_error(X("failed to setup config"));
+        {
+            VexLog("Config FAILED");
+            __leave;
+        }
         VexLog("Config OK");
 
         VexLog("Memory::Setup...");
         if (!Memory::Setup())
-            throw std::runtime_error(X("failed to setup memory"));
+        {
+            VexLog("Memory FAILED");
+            __leave;
+        }
         VexLog("Memory OK");
 
-        // Interfaces: only need m_pSwapChain for vtable[8] hook
-        // partial failure is OK — we only throw if SwapChain is null
         VexLog("Interfaces::Setup...");
-        Interfaces::Setup();
-        if (Interfaces::m_pSwapChain == nullptr)
-            throw std::runtime_error(X("m_pSwapChain null — cannot hook Present"));
-        VexLog("Interfaces OK (SwapChain found)");
+        // Interfaces::Setup does many pattern scans that can throw or return
+        // partial data. We do NOT throw — we just check m_pSwapChain after.
+        bool ifacesOk = false;
+        __try
+        {
+            ifacesOk = Interfaces::Setup();
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            VexLog("Interfaces::Setup threw SEH exception (caught)");
+            ifacesOk = false;
+        }
+        VexLogFmt("Interfaces returned: %s", ifacesOk ? "true" : "false");
 
-        // Input::Setup() removed — WndProc is now set inside hkPresent
-        // from pSwapChain->GetDesc().OutputWindow (guaranteed valid)
+        if (Interfaces::m_pSwapChain == nullptr)
+        {
+            VexLog("m_pSwapChain is NULL — cannot hook Present");
+            __leave;
+        }
+        VexLog("m_pSwapChain OK");
 
         VexLog("Hooks::Setup...");
-        if (!Hooks::Setup())
-            throw std::runtime_error(X("failed to setup hooks"));
+        bool hooksOk = false;
+        __try
+        {
+            hooksOk = Hooks::Setup();
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            VexLog("Hooks::Setup threw SEH (caught)");
+            hooksOk = false;
+        }
+        if (!hooksOk)
+        {
+            VexLog("Hooks FAILED");
+            __leave;
+        }
         VexLog("Hooks OK");
 
         VexLog("=== MENU-ONLY MODE LOADED ===");
+        ok = true;
     }
-    catch (const std::exception& ex)
+    __except (EXCEPTION_EXECUTE_HANDLER)
     {
-        VexLog("EXCEPTION:");
-        VexLog(ex.what());
-        FreeLibraryAndExitThread(static_cast<HMODULE>(lpParameter), EXIT_FAILURE);
-        return EXIT_FAILURE;
+        VexLog("OUTER SEH exception caught in OnDllAttach");
+        ok = false;
     }
 
-    // Wait for unload key
-    while (!Input::IsKeyDown(Config::i(g_Variables.m_Gui.m_iUnloadKey)))
-        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    if (!ok)
+    {
+        VexLog("attach failed — unloading");
+        FreeLibraryAndExitThread(static_cast<HMODULE>(lpParameter), 1);
+        return 1;
+    }
+
+    // Idle loop — wait for unload key (INSERT by default)
+    while (true)
+    {
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        if (GetAsyncKeyState(VK_INSERT) & 0x8000)
+            break;
+    }
 
     VexLog("unload key pressed, detaching...");
-    Hooks::Destroy();
-    Input::Restore();
-    Draw::Destroy();
+    __try { Hooks::Destroy(); } __except (EXCEPTION_EXECUTE_HANDLER) {}
+    __try { Input::Restore(); } __except (EXCEPTION_EXECUTE_HANDLER) {}
 
-    FreeLibraryAndExitThread(static_cast<HMODULE>(lpParameter), EXIT_SUCCESS);
-    return EXIT_SUCCESS;
+    FreeLibraryAndExitThread(static_cast<HMODULE>(lpParameter), 0);
+    return 0;
 }
 
 DWORD WINAPI OnDllDetach(LPVOID lpParameter)
